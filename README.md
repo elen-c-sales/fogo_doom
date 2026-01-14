@@ -12,10 +12,18 @@ Requisitos:
 - Python 3
 - pygame
 - numpy
+- imageio (para salvar GIFs)
 
 Execucao:
+
+Versao original:
 ```
 python fire.py
+```
+
+Versao vetorizada:
+```
+python vectorizedvolumetricfire.py
 ```
 
 ## Controles
