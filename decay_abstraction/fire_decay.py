@@ -71,53 +71,62 @@ def create_particle_streams(num_streams: int, max_age: int, width: int) -> np.nd
 
 def sample_space_time(streams: np.ndarray, total_frames: int, height: int, width: int) -> np.ndarray:
     """
-    Realiza o 'corte transversal' no espaço-tempo.
-    Mapeia qual stream e qual idade corresponde a cada pixel (t, y, x).
+    Descobre qual partícula existe em cada ponto do Espaço-Tempo.
     
-    Sistema de Coordenadas:
-    - Y = 0: Base do fogo (onde nasce)
-    - Y aumenta para cima
+    Para preencher um pixel na posição (Tempo T, Altura Y), precisamos responder:
+    1. "Qual partícula está passando por aqui agora?" -> Identidade da Stream
+    2. "Quão velha essa partícula é?" -> Idade
     """
     
-    # Precisamos calcular índices para todo o cubo (T, Y, X)
-    # T: Tempo atual
-    # Y: Altura (distância da base)
+    # 1. Criar grades de coordenadas para cada pixel do nosso "Cubo de Fogo"
+    #    current_time_grid:  Matriz onde cada célula responde "Em que frame estou?"
+    #    current_height_grid: Matriz onde cada célula responde "Em que altura estou?"
     
-    # Broadcasting setup: (T, Y, 1) para cobrir todo o cubo implicitamente
-    t_indices = np.arange(total_frames).reshape(-1, 1, 1)  # (T, 1, 1)
-    y_indices = np.arange(height).reshape(1, -1, 1)        # (1, H, 1)
+    # Broadcasting: T (tempo) varia no eixo 0, Y (altura) varia no eixo 1
+    current_time_grid = np.arange(total_frames).reshape(-1, 1, 1)  # Shape: (Frames, 1, 1)
+    current_height_grid = np.arange(height).reshape(1, -1, 1)      # Shape: (1, Altura, 1)
     
     # =========================================================
-    # CONCEITO CHAVE: Vínculo Espaço-Temporal
+    # A FÍSICA DO MOVIMENTO VERTICAL CONSTANTE
     # =========================================================
-    # Se uma partícula sobe 1 pixel por frame:
-    # 1. Sua IDADE é igual à sua ALTURA (y)
-    #    (Na base y=0, idade=0. No topo y=99, idade=99)
+    # Se todas as partículas sobem 1 pixel por frame:
+    
+    # PERGUNTA A: Qual a idade da partícula na altura Y?
+    # RESPOSTA:   Exatamente Y frames.
+    #             (Se subiu 50 pixels, viveu por 50 frames)
+    particle_age_grid = current_height_grid
+    
+    # PERGUNTA B: Quando nasceu a partícula que está na altura Y no tempo T?
+    # RESPOSTA:   Tempo Nascimento = Tempo Atual - Idade
+    #             birth_time = T - Y
+    particle_birth_time_grid = current_time_grid - particle_age_grid
+    
+    # =========================================================
+    # CONVERSÃO PARA ÍNDICES DO ARRAY (LOOKUP)
+    # =========================================================
+    
+    # Nossas streams são armazenadas num array onde o índice 0 é a primeira stream gerada.
+    # Como simulamos streams "do passado" (tempo negativo) para preencher o início,
+    # precisamos somar um offset para converter 'tempo de nascimento' em um índice válido.
+    # A primeira stream (índice 0) nasceu em T = -height.
+    offset_to_positive_index = height
+    stream_index_grid = particle_birth_time_grid + offset_to_positive_index
+    
+    # Segurança: garantir que não acessamos índices fora do array
+    max_valid_index = streams.shape[0] - 1
+    stream_index_grid = np.clip(stream_index_grid, 0, max_valid_index)
+    
+    # AGORA O "CORTE":
+    # Vamos buscar os valores de calor na nossa biblioteca de streams.
     #
-    # 2. Sua identidade (STREAM ID) depende de quando nasceu.
-    #    Se ela está na altura Y no tempo T, ela nasceu em (T - Y).
-    #    Stream_ID = (T - Y) + Offset (para índices não serem negativos)
-    # =========================================================
+    # streams[stream_id, age] -> retorna a linha inteira de largura W
+    #
+    # Precisamos remover a dimensão extra (=1) para usar como índices diretos
+    idx_stream = stream_index_grid.squeeze(axis=-1)  # Shape: (Frames, Altura)
+    idx_age = particle_age_grid.squeeze(axis=-1)     # Shape: (1, Altura) -> Broadcast para (Frames, Altura)
     
-    age_grid = y_indices  # Partícula na altura Y tem idade Y
-    
-    # Offset garante que não acessamos índices negativos no array de streams
-    # Precisamos de streams do passado (antes de T=0) para preencher o topo da tela no início
-    offset_streams = height 
-    stream_id_grid = (t_indices - y_indices) + offset_streams
-    
-    # Proteção para não estourar o array (embora o cálculo de num_streams deva prevenir)
-    max_streams = streams.shape[0]
-    stream_id_grid = np.clip(stream_id_grid, 0, max_streams - 1)
-    
-    # Mapeamento (Lookup)
-    # Para cada pixel (t,y), pegamos o calor da stream calculada na idade calculada
-    # O eixo X (largura) é preservado automaticamente do array 'streams'
-    S = stream_id_grid.squeeze(axis=-1)  # Shape (T, H)
-    A = age_grid.squeeze(axis=-1)        # Shape (1, H)
-    
-    # A indexação streams[S, A] retorna (T, H, W)
-    fire_cube = streams[S, A]
+    # Busca vetorizada: "Para cada ponto (T,Y), pegue o calor da stream X na idade Z"
+    fire_cube = streams[idx_stream, idx_age]
     
     return fire_cube
 
@@ -168,7 +177,7 @@ def gerar_fogo_matriz_decaimento():
     # 1. Calcular quantas streams precisamos
     # Precisamos cobrir do passado (T - Height) até o futuro (Total Frames)
     # Range total = Total Frames + Altura
-    num_streams = TOTAL_FRAMES + ALTURA + 10  # +10 margem de segurança
+    num_streams = TOTAL_FRAMES + ALTURA
     
     # 2. Gerar as histórias de vida (Streams)
     print("1. Gerando streams de partículas...")
